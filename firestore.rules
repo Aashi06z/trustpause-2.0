@@ -1,0 +1,110 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function hasOnly(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function boundedString(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function serverCreatedAt(data) {
+      return data.createdAt == request.time;
+    }
+
+    function validTrustedContact(data, contactId) {
+      return hasOnly(data, ['id', 'name', 'relationship', 'phoneNumber', 'verificationPhraseHash', 'createdAt'])
+        && data.id == contactId
+        && boundedString(data.id, 80)
+        && boundedString(data.name, 80)
+        && boundedString(data.relationship, 50)
+        && boundedString(data.phoneNumber, 20)
+        && (!('verificationPhraseHash' in data) || boundedString(data.verificationPhraseHash, 128))
+        && data.createdAt is timestamp;
+    }
+
+    function validScan(data) {
+      return hasOnly(data, ['riskLevel', 'score', 'signals', 'dangerousAction', 'createdAt'])
+        && data.riskLevel in ['LOW', 'CAUTION', 'HIGH', 'CRITICAL']
+        && data.score is int
+        && data.score >= 0
+        && data.score <= 100
+        && data.signals is list
+        && data.signals.size() <= 10
+        && data.dangerousAction is string
+        && data.dangerousAction.size() <= 160
+        && data.createdAt is timestamp;
+    }
+
+    function validIncident(data) {
+      return hasOnly(data, ['incidentType', 'timeline', 'transactionReference', 'createdAt'])
+        && data.incidentType in ['sent-money', 'shared-secret', 'installed-app', 'clicked-link', 'shared-information']
+        && boundedString(data.incidentType, 32)
+        && boundedString(data.timeline, 100)
+        && boundedString(data.transactionReference, 100)
+        && data.createdAt is timestamp;
+    }
+
+    function validPreferences(data) {
+      return hasOnly(data, ['message_analysis_consent', 'trust_circle_requests', 'browser_link_interception', 'payment_pause', 'call_screening', 'media_checks', 'hold_to_continue', 'updatedAt'])
+        && data.message_analysis_consent is bool
+        && data.trust_circle_requests is bool
+        && data.browser_link_interception is bool
+        && data.payment_pause is bool
+        && data.call_screening is bool
+        && data.media_checks is bool
+        && data.hold_to_continue is bool
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read, write: if false;
+
+      match /trustedContacts/{contactId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && validTrustedContact(request.resource.data, contactId)
+          && serverCreatedAt(request.resource.data);
+        allow update: if isOwner(userId)
+          && validTrustedContact(request.resource.data, contactId)
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /scanResults/{scanId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && validScan(request.resource.data)
+          && serverCreatedAt(request.resource.data);
+        allow update, delete: if false;
+      }
+
+      match /incidents/{incidentId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && validIncident(request.resource.data)
+          && serverCreatedAt(request.resource.data);
+        allow update, delete: if false;
+      }
+
+      match /preferences/{preferenceId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && preferenceId == 'current'
+          && validPreferences(request.resource.data)
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
