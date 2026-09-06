@@ -57,6 +57,25 @@ describe('analyzeQrContent — URL routing to the shared link engine', () => {
     }
   })
 
+  it('analyzes a decoded URL that carries trailing text as a URL, never unsupported', async () => {
+    const result = await analyzeQrContent({ content: 'https://www.wikipedia.org\nScan this for a demo' })
+
+    expect(result.kind).toBe('url')
+    if (result.kind === 'url') {
+      expect(result.input).toContain('https://www.wikipedia.org')
+      expect(result.displayedHostname).toBe('www.wikipedia.org')
+      expect(result.classification).toBe('UNKNOWN')
+      expect(result.shouldInterrupt).toBe(false)
+      expect(result.normalizedUrl).toBe('https://www.wikipedia.org/')
+    }
+  })
+
+  it('analyzes a decoded URL with trailing content on the same line', async () => {
+    const result = await analyzeQrContent({ content: 'https://example.com login page demo' })
+    expect(result.kind).toBe('url')
+    if (result.kind === 'url') expect(result.displayedHostname).toBe('example.com')
+  })
+
   it('analyzes a protocol-less hostname as a URL for analysis', async () => {
     const result = await analyzeQrContent({ content: 'secure-bank-kyc-verification.example' })
 

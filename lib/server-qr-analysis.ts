@@ -82,9 +82,12 @@ export async function analyzeQrContent(input: QrRiskRequest): Promise<QrRiskResp
     }
   }
 
+  // Analyze the clean leading URL (classification.url) rather than the raw
+  // decoded string, which may carry trailing text/control characters from a
+  // real camera decode. `input` keeps the full decoded value for display.
   const base =
     classification.kind === 'url'
-      ? await analyzeLinkWithEvidence(trimmed)
+      ? await analyzeLinkWithEvidence(classification.url ?? trimmed)
       : looksLikeHostOnly(trimmed)
         ? await analyzeLinkWithEvidence(`https://${trimmed}`)
         : null

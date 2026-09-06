@@ -65,7 +65,10 @@ export default function QrCodeScanner({ onUrlDecoded }: { onUrlDecoded?: (value:
       scanningBusyRef.current = true
       // Decode the current frame; throws when no QR code is visible.
       QrScanner.scanImage(video, { returnDetailedScanResult: true })
-        .then((result) => handleDecoded(result.data))
+        .then((result) => {
+          console.log('[QR CAMERA RAW]', JSON.stringify(result.data))
+          handleDecoded(result.data)
+        })
         .catch(() => {})
         .finally(() => { scanningBusyRef.current = false })
     }, 500)
@@ -136,6 +139,10 @@ export default function QrCodeScanner({ onUrlDecoded }: { onUrlDecoded?: (value:
   }
 
   async function classifyQrContent(value: string) {
+    // Analyze the clean leading URL, not the raw decoded string (which can
+    // carry trailing text/control characters from a real camera decode).
+    const classification = classifyQrContentKind(value)
+    const analyzeValue = classification.kind === 'url' && classification.url ? classification.url : value
     const localIsHttp = isHttpUrl(value)
     // Fallback used only when the risk API is unreachable. It never claims a
     // URL is safe — an unverified destination stays UNKNOWN (CAUTION).
@@ -168,7 +175,7 @@ export default function QrCodeScanner({ onUrlDecoded }: { onUrlDecoded?: (value:
           detectedSignals: [],
         }
 
-    const server = await fetchJson<QrRiskResponse>('/api/qr-risk', { content: value }, () => localFallback)
+    const server = await fetchJson<QrRiskResponse>('/api/qr-risk', { content: analyzeValue }, () => localFallback)
     const normalizedUrl = server.kind === 'url' ? server.normalizedUrl ?? null : null
     return {
       kind: server.kind,
@@ -184,6 +191,9 @@ export default function QrCodeScanner({ onUrlDecoded }: { onUrlDecoded?: (value:
   }
 
   async function handleDecoded(value: string) {
+    const decodedKind = classifyQrContentKind(value)
+    console.log('[QR CAMERA RAW]', JSON.stringify(value))
+    console.log('[QR CAMERA CLASSIFICATION]', JSON.stringify({ kind: decodedKind.kind, scheme: decodedKind.scheme, url: decodedKind.url }))
     stopScanLoop()
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
@@ -194,20 +204,23 @@ export default function QrCodeScanner({ onUrlDecoded }: { onUrlDecoded?: (value:
     setClassification({ status: 'loading' })
     try {
       const result = await classifyQrContent(value)
+      console.log('[QR UI TYPE]', JSON.stringify(result.kind))
       setClassification({ status: 'done', value: result })
     } catch (error) {
+      console.log('[QR UI TYPE] error', error instanceof Error ? error.message : String(error))
       setClassification({
         status: 'error',
         message: error instanceof Error ? error.message : 'QR analysis failed. Review the content manually before acting.',
       })
     }
-    if (isHttpUrl(value)) onUrlDecoded?.(value)
+    if (decodedKind.kind === 'url') onUrlDecoded?.(decodedKind.url ?? value)
   }
 
   async function scanUpload(file: File) {
     setError('')
     try {
       const result = await QrScanner.scanImage(file, { returnDetailedScanResult: true })
+      console.log('[QR CAMERA RAW]', JSON.stringify(result.data))
       await handleDecoded(result.data)
     } catch {
       setState('error')
